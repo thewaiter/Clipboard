@@ -318,7 +318,7 @@ _set_mouse_coord(Instance *inst,
 static int
 _menu_fill(Instance *inst, Eina_Bool mouse_event)
 {
-  EINA_SAFETY_ON_NULL_RETURN(inst);
+  EINA_SAFETY_ON_NULL_RETURN_VAL(inst, E_GADCON_ORIENT_VERT);
 
   E_Menu_Item *mi;
   /* Default Orientation of menu for float list */

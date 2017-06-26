@@ -4,6 +4,7 @@
 #include <string.h>
 #include <e.h>
 #include "config.h"
+#include "clip_log.h"
 
 #define MAGIC_LABEL_SIZE 50
 #define MAGIC_HIST_SIZE  20
@@ -74,5 +75,5 @@ struct _Mod_Inst
 
 void cb_mod_log(const Eina_Log_Domain *d, Eina_Log_Level level, const char *file, const char *fnc, int line, const char *fmt, void *data, va_list args);
 extern int clipboard_log;
-
+void   free_clip_data(Clip_Data *clip);
 #endif
