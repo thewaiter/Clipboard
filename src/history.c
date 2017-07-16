@@ -5,21 +5,6 @@
 #define HISTORY_NAME "history"
 #define HISTORY_VERSION     1 /* must be < 9  */
 
-/* convenience macro to compress code */
-#define CALLOC_DIGIT_STR(str, n)                     \
-do {                                                 \
-  long _tempn_ = n, _digits_ = 1;                    \
-  while (_tempn_ /= 10) _digits_++;                  \
-  str = malloc(_digits_ + 1);                        \
-  if (!str) {                                        \
-    /* This is bad, leave it to calling function */  \
-    CRI("ERROR: Memory allocation Failed!!");        \
-    eet_close(history_file);                         \
-    return EET_ERROR_OUT_OF_MEMORY;                  \
-   }                                                 \
-   sprintf(str, "%d", 0);                            \
- } while(0)
-
 #if 0
   #define PATH_MAX 4096
   /** PATH_MAX is defined in <linux/limits.h>
@@ -34,6 +19,28 @@ do {                                                 \
    * Regardless in the e-dev tradition we are using it here.
    */
 #endif
+
+/* convenience macros to compress code */
+#define CALLOC_DIGIT_STR(str, n)                     \
+do {                                                 \
+  long _tempn_ = n, _digits_ = 1;                    \
+  while (_tempn_ /= 10) _digits_++;                  \
+  str = malloc(_digits_ + 1);                        \
+  if (!str) {                                        \
+    /* This is bad, leave it to calling function */  \
+    CRI("ERROR: Memory allocation Failed!!");        \
+    eet_close(history_file);                         \
+    return EET_ERROR_OUT_OF_MEMORY;                  \
+   }                                                 \
+   sprintf(str, "%d", 0);                            \
+ } while(0)
+
+#define PATH_MAX_ERR                                              \
+do {                                                              \
+  ERR("PATH_MAX exceeded. Need Len %d, PATH_MAX %d", len, PATH_MAX); \
+  strcpy(path, "");                                               \
+  success = EINA_FALSE;                                           \
+ } while(0)                                                       \
 
 /* Private Funcions */
 Eina_Bool _mkpath_if_not_exists(const char *path);
@@ -65,11 +72,6 @@ _mkpath_if_not_exists(const char *path)
  * @param path char array to store history path in.
  * @return EINA_TRUE on success EINA_FALSE otherwise
  *
- * This function assumes the path char array is large enough to store
- *   data path in. Naive implementation, no checks !!
- *
- * You have been warned!!
- *
  */
 Eina_Bool
 _set_data_path(char *path)
@@ -77,32 +79,46 @@ _set_data_path(char *path)
     EINA_SAFETY_ON_NULL_RETURN_VAL(path, EINA_FALSE);
 
     /* FIXME: Non-portable nix only code */
-    char *temp_str;
+    const char *temp_str = NULL;
     Eina_Bool success = EINA_TRUE;
 
     /* See if XDG_DATA_HOME is defined
      *     if so use it
      *     if not use XDG_DATA_HOME default
      */
-    temp_str = getenv ("XDG_DATA_HOME");
-    if (temp_str!=NULL) {
-      strcpy(path, temp_str);
-      // Ensure XDG_DATA_HOME terminates in '/'
-      if (path[strlen(path)-1] != '/')
-        strcat(path,"/");
-      strcat(path, DATA_DIR);
+    temp_str = getenv("XDG_DATA_HOME");
+    if (temp_str && temp_str[0] == '/' ) {
+      const size_t len = snprintf(NULL, 0, "%s", temp_str) 
+                              + 1 + (temp_str[strlen(temp_str)] != '/');
+      if (len <= PATH_MAX) {
+        snprintf(path, strlen(temp_str)+1, "%s", temp_str);
+        // Ensure XDG_DATA_HOME terminates in '/'
+        if (path[strlen(path)-1] != '/')
+          strcat(path, "/");
+      }
+      else
+        PATH_MAX_ERR;
     }
     /* XDG_DATA_HOME default */
     else {
-      temp_str = getenv("HOME");
-      // Hopefully unnecessary Safety check
-      if (temp_str!=NULL)
-         sprintf(path,"%s/.local/share/",temp_str);
-      else {
-         // Should never happen
-         strcpy(path, "");
-         success = EINA_FALSE;
+      if (temp_str && temp_str[0] != '/')
+        WRN("Malformed XDG_DATA_HOME path: %s", temp_str);
+      struct passwd *pw = NULL;
+      pw = getpwuid(getuid());
+      temp_str = pw->pw_dir;
+      const size_t len = snprintf(NULL, 0, "%s/.local/share/", temp_str) + 1;
+      if (len <= PATH_MAX) {
+        // Hopefully unnecessary Safety check
+        if (temp_str)
+           sprintf(path,"%s/.local/share/",temp_str);
+        else {
+           // Should never happen
+           strcpy(path, "");
+           success = EINA_FALSE;
+        }
      }
+     else
+        PATH_MAX_ERR;
     }
     return success;
 }
@@ -116,21 +132,25 @@ _set_data_path(char *path)
  * This function not only sets the history path but also creates the needed
  * directories if they do not exist.
  *
- * This function assumes the path char array is large enough to store
- *   data path in. Naive implementation, no checks !!
- *
- * You have been warned!!
  */
 Eina_Bool
 _set_history_path(char *path)
 {
    EINA_SAFETY_ON_NULL_RETURN_VAL(path, EINA_FALSE);
 
+   char temp_str[PATH_MAX];
    Eina_Bool success = EINA_TRUE;
+
    if(_set_data_path(path)) {
-       sprintf(path,"%s%s/", path, CLIPBOARD_MOD_NAME);
-       success = _mkpath_if_not_exists(path);
-       strcat(path, HISTORY_NAME);
+       const size_t len = snprintf(NULL, 0, "%s%s/%s", path, CLIPBOARD_MOD_NAME, HISTORY_NAME) + 1;
+       if (len <= PATH_MAX) {
+         strcpy(temp_str, path);
+         sprintf(path, "%s%s/", temp_str, CLIPBOARD_MOD_NAME);
+         success = _mkpath_if_not_exists(path);
+         strcat(path, HISTORY_NAME);
+       }
+       else
+        PATH_MAX_ERR;
    } else
        success = EINA_FALSE;
    return success;
@@ -159,8 +179,10 @@ read_history(Eina_List **items, unsigned ignore_ws, unsigned label_length)
     long version, item_num;
 
     /* Open history file */
-    if(!_set_history_path(history_path))
+    if(!_set_history_path(history_path)) {
+      ERR("History File Creation Error: %s", history_path);
       return EET_ERROR_BAD_OBJECT;
+    }
     history_file = eet_open(history_path, EET_FILE_MODE_READ);
     if (!history_file) {
       ERR("Failed to open history file: %s", history_path);
@@ -245,8 +267,10 @@ save_history(Eina_List *items)
     Eet_Error ret;
 
     /* Open history file */
-    if(!_set_history_path(history_path))
-      return  EET_ERROR_BAD_OBJECT;
+    if(!_set_history_path(history_path)) {
+      ERR("History File Creation Error: %s", history_path);
+      return EET_ERROR_BAD_OBJECT;
+    }
     history_file = eet_open(history_path, EET_FILE_MODE_WRITE);
 
     if (history_file) {
