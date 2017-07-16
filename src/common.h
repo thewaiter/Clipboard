@@ -18,9 +18,6 @@ do {                                    \
   if (exp) return;                      \
 } while(0)
 
-/* Possible Future Config Options */
-// #define FC_IGNORE_WHITE_SPACE EINA_TRUE /*Implemented */
-
 /* EINA_LOG support macros and global */
 
 #undef DBG
